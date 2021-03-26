@@ -2,7 +2,6 @@
 using RimWorld;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -211,76 +210,45 @@ namespace ZombieLand
 		[HarmonyPatch(nameof(Verse.TickManager.TickManagerUpdate))]
 		static class Verse_TickManager_TickManagerUpdate_Patch
 		{
-			public static float percentZombiesTicked = 1f;
-			static readonly Stopwatch watch = new Stopwatch();
+			public static Verse.TickManager verseTickmanager = Find.TickManager;
+			public static List<TickManager> tickManagers = new List<TickManager>();
 
-			static void TickZombies(Verse.TickManager manager, int num)
+			static void Prefix()
 			{
-				_ = num;
-				watch.Reset();
-				watch.Start();
-				manager.DoSingleTick();
-				var maxTick = 2 * watch.ElapsedTicks;
-
-				var tickManager = Find.CurrentMap?.GetComponent<TickManager>();
-				var zombieTicker = tickManager?.ZombieTicking();
-				if (zombieTicker != null)
-				{
-					tickManager.zombiesTicked = 0;
-
-					watch.Reset();
-					watch.Start();
-					while (zombieTicker.MoveNext() && watch.ElapsedTicks < maxTick) ;
-
-					percentZombiesTicked = tickManager.zombiesTicked == 0 || tickManager.totalTicking == 0 ? 1f : (float)tickManager.zombiesTicked / tickManager.totalTicking;
-				}
-			}
-
-			static void TickZombieWanderer()
-			{
-				_ = ZombieWanderer.processor.MoveNext();
-			}
-
-			static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions, ILGenerator generator)
-			{
-				var jump = generator.DefineLabel();
-				var m_TickZombieWanderer = SymbolExtensions.GetMethodInfo(() => TickZombieWanderer());
-				var m_TickZombies = SymbolExtensions.GetMethodInfo(() => TickZombies(null, 0));
-				var m_DoSingleTick = AccessTools.Method(typeof(Verse.TickManager), "DoSingleTick");
-
-				var list = instructions.ToList();
-				var idx = list.FindLastIndex(code => code.opcode == OpCodes.Conv_R4);
-				if (idx > 0)
-				{
-					var ticksThisFrameLocalVarCode = list[idx - 1].Clone();
-					list.Insert(0, new CodeInstruction(OpCodes.Call, m_TickZombieWanderer));
-					idx = list.FindIndex(code => code.Calls(m_DoSingleTick));
-					if (idx >= 0)
-					{
-						list[idx].operand = m_TickZombies;
-						list.Insert(idx, ticksThisFrameLocalVarCode);
-					}
-					else
-						Log.Error("Unexpected code in patch " + MethodBase.GetCurrentMethod().DeclaringType);
-				}
-				else
-					Log.Error("Unexpected code in patch " + MethodBase.GetCurrentMethod().DeclaringType);
-
-				/*var found = false;
-				var valueFrom = 1000f;
-				var valueTo = 3000f;
-				foreach (var code in list)
-					if (code.operand is float floatValue && floatValue == valueFrom)
-					{
-						code.operand = valueTo;
-						found = true;
-					}
-				if (found == false)
-					Log.Error("Float constant " + valueFrom + " not found in patch " + MethodBase.GetCurrentMethod().DeclaringType);*/
-
-				return list.AsEnumerable();
+				tickManagers = Find.Maps
+					.Select(map => map.GetComponent<TickManager>())
+					.OfType<TickManager>() // filter null out
+					.ToList();
+				tickManagers.ForEach(tm => tm.PrepareZombieTicking());
 			}
 		}
+
+		[HarmonyPatch(typeof(Verse.TickManager))]
+		[HarmonyPatch(nameof(Verse.TickManager.DoSingleTick))]
+		static class Verse_TickManager_DoSingleTick_Patch
+		{
+			static void Postfix()
+			{
+				_ = ZombieWanderer.processor.MoveNext();
+				var vtm = Verse_TickManager_TickManagerUpdate_Patch.verseTickmanager;
+				Verse_TickManager_TickManagerUpdate_Patch.tickManagers.ForEach(tm => tm.TickZombies(vtm));
+				/*
+				Find.Maps.Do(map =>
+				{
+					var tickManager = map.GetComponent<TickManager>();
+					var zombieTicker = tickManager?.ZombieTicking();
+					if (zombieTicker != null)
+					{
+						tickManager.zombiesTicked = 0;
+						while (zombieTicker.MoveNext()) ;
+
+						percentZombiesTicked = tickManager.zombiesTicked == 0 || tickManager.totalTicking == 0 ? 1f : (float)tickManager.zombiesTicked / tickManager.totalTicking;
+					}
+				});
+				*/
+			}
+		}
+
 		[HarmonyPatch(typeof(Verse.TickManager))]
 		[HarmonyPatch("NothingHappeningInGame")]
 		static class Verse_TickManager_NothingHappeningInGame_Patch
@@ -2894,18 +2862,16 @@ namespace ZombieLand
 					else if (bodyType == BodyTypeDefOf.Fat)
 						factor = 0.1f;
 
+					if (zombie.wasMapPawnBefore)
+						__result *= 2f;
+
+					if (zombie.isAlbino)
+						__result *= 5f;
+
 					// instead of ticking them with the game speed multiplier, we
 					//
 					var multiplier = (float)(tm.CurTimeSpeed) / Verse_TickManager_TickManagerUpdate_Patch.percentZombiesTicked;
-					if (Constants.USE_ADAPTIVE_TICKING == false)
-					{
-						// instead of ticking zombies as often as everything else, we tick
-						// them at 1x speed and make them faster instead. Not perfect but
-						// a very good workaround for good game speed
-						//
-						multiplier = tm.TickRateMultiplier;
-						if (multiplier > 1f) multiplier = 1f + (multiplier - 1f) / 5f;
-					}
+					
 					__result = 1.5f * speed * factor * multiplier;
 					if (zombie.wasMapPawnBefore)
 						__result *= 2f;

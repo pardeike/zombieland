@@ -24,8 +24,10 @@ namespace ZombieLand
 		public int currentColonyPoints;
 
 		public List<Zombie> allZombiesCached;
+
 		public int zombiesTicked = 0;
 		public int totalTicking = 0;
+
 		IEnumerator taskTicker;
 		bool runZombiesForNewIncident = false;
 
@@ -163,27 +165,29 @@ namespace ZombieLand
 			return Mathf.Min(ZombieSettings.Values.maximumNumberOfZombies, count);
 		}
 
-		public IEnumerator ZombieTicking()
+		public void PrepareZombieTicking()
 		{
-			if (Find.TickManager.TickRateMultiplier == 0f) yield break;
-			var speed = (int)Find.TickManager.CurTimeSpeed;
-			if (speed > 0)
+			zombiesTicked = 0;
+		}
+
+		public void TickZombies(Verse.TickManager vtm)
+		{
+			if (vtm.TickRateMultiplier <= 0f) return;
+			var speed = (int)vtm.CurTimeSpeed;
+			if (speed <= 0) return;
+
+			var zombies = allZombiesCached
+				.Where(zombie => zombie.Spawned && zombie.Dead == false)
+				.OrderByDescending(zombie => zombie.tickingImportance);
+
+			if (speed > 1) speed--;
+			var randomZombies = zombies.ToArray();
+			totalTicking = randomZombies.Length;
+			for (var i = 0; i < totalTicking; i += speed)
 			{
-				var zombies = allZombiesCached.Where(zombie => zombie.Spawned && zombie.Dead == false);
-				yield return null;
-
-				zombies = zombies.InRandomOrder();
-				yield return null;
-
-				if (speed > 1) speed--;
-				var randomZombies = zombies.ToArray();
-				totalTicking = randomZombies.Length;
-				for (var i = 0; i < totalTicking; i += speed)
-				{
-					randomZombies[i].CustomTick();
-					zombiesTicked++;
-					yield return null;
-				}
+				randomZombies[i].CustomTick();
+				zombiesTicked++;
+				//yield return null;
 			}
 		}
 
@@ -331,23 +335,23 @@ namespace ZombieLand
 					switch (ZombieSettings.Values.spawnHowType)
 					{
 						case SpawnHowType.AllOverTheMap:
-						{
-							var cell = CellFinderLoose.RandomCellWith(Tools.ZombieSpawnLocator(map), map, 4);
-							if (cell.IsValid)
-								ZombieGenerator.SpawnZombie(cell, map, ZombieType.Random, (zombie) => { allZombiesCached.Add(zombie); });
-							return;
-						}
+							{
+								var cell = CellFinderLoose.RandomCellWith(Tools.ZombieSpawnLocator(map), map, 4);
+								if (cell.IsValid)
+									ZombieGenerator.SpawnZombie(cell, map, ZombieType.Random, (zombie) => { allZombiesCached.Add(zombie); });
+								return;
+							}
 						case SpawnHowType.FromTheEdges:
-						{
-							if (CellFinder.TryFindRandomEdgeCellWith(Tools.ZombieSpawnLocator(map), map, CellFinder.EdgeRoadChance_Neutral, out var cell))
-								ZombieGenerator.SpawnZombie(cell, map, ZombieType.Random, (zombie) => { allZombiesCached.Add(zombie); });
-							return;
-						}
+							{
+								if (CellFinder.TryFindRandomEdgeCellWith(Tools.ZombieSpawnLocator(map), map, CellFinder.EdgeRoadChance_Neutral, out var cell))
+									ZombieGenerator.SpawnZombie(cell, map, ZombieType.Random, (zombie) => { allZombiesCached.Add(zombie); });
+								return;
+							}
 						default:
-						{
-							Log.Error("Unknown spawn type " + ZombieSettings.Values.spawnHowType);
-							return;
-						}
+							{
+								Log.Error("Unknown spawn type " + ZombieSettings.Values.spawnHowType);
+								return;
+							}
 					}
 				}
 			}

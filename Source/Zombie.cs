@@ -82,6 +82,7 @@ namespace ZombieLand
 		// transient vars
 		public bool needsGraphics = false;
 		bool disposed = false;
+		public float tickingImportance = 0f;
 
 		static readonly int totalNthTicks;
 		static public int[] nthTickValues;
