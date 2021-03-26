@@ -25,8 +25,7 @@ namespace ZombieLand
 
 		public List<Zombie> allZombiesCached;
 
-		public int zombiesTicked = 0;
-		public int totalTicking = 0;
+		public static float percentageOfZombiesToTick = 1f;
 
 		IEnumerator taskTicker;
 		bool runZombiesForNewIncident = false;
@@ -163,32 +162,6 @@ namespace ZombieLand
 			var difficultyMultiplier = Find.Storyteller.difficulty.threatScale;
 			var count = (int)(perColonistZombieCount * colonistMultiplier * baseStrengthFactor * colonyMultiplier * difficultyMultiplier);
 			return Mathf.Min(ZombieSettings.Values.maximumNumberOfZombies, count);
-		}
-
-		public void PrepareZombieTicking()
-		{
-			zombiesTicked = 0;
-		}
-
-		public void TickZombies(Verse.TickManager vtm)
-		{
-			if (vtm.TickRateMultiplier <= 0f) return;
-			var speed = (int)vtm.CurTimeSpeed;
-			if (speed <= 0) return;
-
-			var zombies = allZombiesCached
-				.Where(zombie => zombie.Spawned && zombie.Dead == false)
-				.OrderByDescending(zombie => zombie.tickingImportance);
-
-			if (speed > 1) speed--;
-			var randomZombies = zombies.ToArray();
-			totalTicking = randomZombies.Length;
-			for (var i = 0; i < totalTicking; i += speed)
-			{
-				randomZombies[i].CustomTick();
-				zombiesTicked++;
-				//yield return null;
-			}
 		}
 
 		public static float ZombieMaxCosts(Zombie zombie)
@@ -472,9 +445,28 @@ namespace ZombieLand
 			}
 		}
 
+		public static void IncreaseTicking()
+		{
+			percentageOfZombiesToTick = Math.Min(1f, percentageOfZombiesToTick + 0.1f);
+		}
+
+		public static void ReduceTicking()
+		{
+			percentageOfZombiesToTick *= Math.Max(0.1f, percentageOfZombiesToTick * 0.9f);
+		}
+
+		// tick zombies and tasks
+		//
 		public override void MapComponentTick()
 		{
 			_ = taskTicker.MoveNext();
+
+			var zombiesByImportance = allZombiesCached
+				.Where(zombie => zombie.Spawned && zombie.Dead == false);
+			//.OrderByDescending(zombie => zombie.tickingImportance);
+
+			var slice = (int)(zombiesByImportance.Count() * percentageOfZombiesToTick);
+			zombiesByImportance.InRandomOrder().Take(slice).Do(zombie => zombie.CustomTick());
 		}
 	}
 }

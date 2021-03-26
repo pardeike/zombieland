@@ -204,25 +204,59 @@ namespace ZombieLand
 			}
 		}
 
-		// custom ticking
+		// custom ticking scaler
 		//
 		[HarmonyPatch(typeof(Verse.TickManager))]
 		[HarmonyPatch(nameof(Verse.TickManager.TickManagerUpdate))]
 		static class Verse_TickManager_TickManagerUpdate_Patch
 		{
-			public static Verse.TickManager verseTickmanager = Find.TickManager;
-			public static List<TickManager> tickManagers = new List<TickManager>();
+			static bool skippingTicks;
 
 			static void Prefix()
 			{
-				tickManagers = Find.Maps
-					.Select(map => map.GetComponent<TickManager>())
-					.OfType<TickManager>() // filter null out
-					.ToList();
-				tickManagers.ForEach(tm => tm.PrepareZombieTicking());
+				skippingTicks = false;
+			}
+
+			static bool WorstAllowedFPSReached(float elapsedMilliseconds, float thousandDividedByWorstAllowedFPS)
+			{
+				var skipLoop = elapsedMilliseconds > thousandDividedByWorstAllowedFPS;
+				if (skipLoop)
+				{
+					TickManager.ReduceTicking();
+					skippingTicks = true;
+				}
+				return skipLoop;
+			}
+
+			static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+			{
+				var f_WorstAllowedFPS = AccessTools.Field(typeof(Verse.TickManager), "WorstAllowedFPS");
+
+				var list = instructions.ToList();
+				var idx = list.FindIndex(code => code.LoadsField(f_WorstAllowedFPS));
+				if (idx > 0 && list[idx + 1].opcode == OpCodes.Div)
+					if (list[idx + 2].opcode == OpCodes.Bgt || list[idx + 2].opcode == OpCodes.Bgt_S)
+					{
+						list[idx + 2].opcode = OpCodes.Brtrue;
+						list.Insert(idx + 2, new CodeInstruction(OpCodes.Call, SymbolExtensions.GetMethodInfo(() => WorstAllowedFPSReached(0, 0))));
+					}
+				return list.AsEnumerable();
+			}
+
+			static void Postfix()
+			{
+				if (skippingTicks)
+					TickManager.ReduceTicking();
+				else
+					TickManager.IncreaseTicking();
+
+				//if (Find.TickManager.TicksAbs % 30 == 0)
+				//	Log.Warning($"# {TickManager.percentageOfZombiesToTick}");
 			}
 		}
 
+		// ticking zombie wanderer
+		//
 		[HarmonyPatch(typeof(Verse.TickManager))]
 		[HarmonyPatch(nameof(Verse.TickManager.DoSingleTick))]
 		static class Verse_TickManager_DoSingleTick_Patch
@@ -230,22 +264,6 @@ namespace ZombieLand
 			static void Postfix()
 			{
 				_ = ZombieWanderer.processor.MoveNext();
-				var vtm = Verse_TickManager_TickManagerUpdate_Patch.verseTickmanager;
-				Verse_TickManager_TickManagerUpdate_Patch.tickManagers.ForEach(tm => tm.TickZombies(vtm));
-				/*
-				Find.Maps.Do(map =>
-				{
-					var tickManager = map.GetComponent<TickManager>();
-					var zombieTicker = tickManager?.ZombieTicking();
-					if (zombieTicker != null)
-					{
-						tickManager.zombiesTicked = 0;
-						while (zombieTicker.MoveNext()) ;
-
-						percentZombiesTicked = tickManager.zombiesTicked == 0 || tickManager.totalTicking == 0 ? 1f : (float)tickManager.zombiesTicked / tickManager.totalTicking;
-					}
-				});
-				*/
 			}
 		}
 
@@ -2757,128 +2775,16 @@ namespace ZombieLand
 				if (!(thing is Zombie zombie)) return true;
 
 				if (stat == StatDefOf.PainShockThreshold)
-				{
-					if (zombie.raging > 0 || zombie.wasMapPawnBefore)
-					{
-						__result = 1000f;
-						return false;
-					}
-					if (zombie.hasTankyShield != -1f || zombie.hasTankyHelmet != -1f || zombie.hasTankySuit != -1f)
-					{
-						__result = 5000f;
-						return false;
-					}
-
-					var bodyType = zombie.story.bodyType;
-					if (bodyType == BodyTypeDefOf.Thin)
-					{
-						__result = 0.1f;
-						return false;
-					}
-					if (bodyType == BodyTypeDefOf.Hulk)
-					{
-						__result = 0.8f;
-						return false;
-					}
-					else if (bodyType == BodyTypeDefOf.Fat)
-					{
-						__result = 10f;
-						return false;
-					}
-					__result = 0.8f;
-					return false;
-				}
+					return PainShockThreshold(out __result, zombie);
 
 				if (stat == StatDefOf.MeleeHitChance)
-				{
-					if (zombie.IsDowned())
-					{
-						__result = 0.1f;
-						return false;
-					}
-
-					if (zombie.hasTankyShield != -1f)
-					{
-						__result = 1.0f;
-						return false;
-					}
-
-					if (zombie.hasTankyHelmet != -1f || zombie.hasTankySuit != -1f)
-					{
-						__result = 0.9f;
-						return false;
-					}
-
-					if (zombie.story.bodyType == BodyTypeDefOf.Fat)
-					{
-						__result = 0.8f;
-						return false;
-					}
-
-					if (zombie.state == ZombieState.Tracking || zombie.raging > 0 || zombie.wasMapPawnBefore)
-						__result = Constants.ZOMBIE_HIT_CHANCE_TRACKING;
-					else
-						__result = Constants.ZOMBIE_HIT_CHANCE_IDLE;
-					return false;
-				}
+					return MeleeHitChance(out __result, zombie);
 
 				if (stat == StatDefOf.MeleeDodgeChance)
-				{
-					if (zombie.isAlbino)
-						__result = 0f;
-					else
-						__result = 0.02f;
-					return false;
-				}
+					return MeleeDodgeChance(out __result, zombie);
 
 				if (stat == StatDefOf.MoveSpeed)
-				{
-					var tm = Find.TickManager;
-
-					if (zombie.IsDowned())
-					{
-						__result = 0.004f * tm.TickRateMultiplier;
-						return false;
-					}
-
-					if (zombie.IsTanky)
-					{
-						__result = 0.002f * tm.TickRateMultiplier;
-						return false;
-					}
-
-					float speed;
-					if (zombie.isAlbino || zombie.state == ZombieState.Tracking || zombie.raging > 0 || zombie.wasMapPawnBefore)
-						speed = ZombieSettings.Values.moveSpeedTracking;
-					else
-						speed = ZombieSettings.Values.moveSpeedIdle;
-
-					var factor = 1f;
-					var bodyType = zombie.story.bodyType;
-					if (bodyType == BodyTypeDefOf.Thin)
-						factor = 0.75f;
-					else if (bodyType == BodyTypeDefOf.Hulk)
-						factor = 0.2f;
-					else if (bodyType == BodyTypeDefOf.Fat)
-						factor = 0.1f;
-
-					if (zombie.wasMapPawnBefore)
-						__result *= 2f;
-
-					if (zombie.isAlbino)
-						__result *= 5f;
-
-					// instead of ticking them with the game speed multiplier, we
-					//
-					var multiplier = (float)(tm.CurTimeSpeed) / Verse_TickManager_TickManagerUpdate_Patch.percentZombiesTicked;
-					
-					__result = 1.5f * speed * factor * multiplier;
-					if (zombie.wasMapPawnBefore)
-						__result *= 2f;
-					if (zombie.isAlbino)
-						__result *= 5f;
-					return false;
-				}
+					return MoveSpeed(ref __result, zombie);
 
 				if (zombie.hasTankySuit != -1f || zombie.hasTankyHelmet != -1f)
 				{
@@ -2887,6 +2793,7 @@ namespace ZombieLand
 						__result = -999;
 						return false;
 					}
+
 					if (stat == StatDefOf.ComfyTemperatureMax)
 					{
 						__result = 999f;
@@ -2895,6 +2802,119 @@ namespace ZombieLand
 				}
 
 				return true;
+			}
+
+			static bool MoveSpeed(ref float __result, Zombie zombie)
+			{
+				var tm = Find.TickManager;
+
+				if (zombie.IsDowned())
+				{
+					__result = 0.004f * tm.TickRateMultiplier;
+					return false;
+				}
+
+				// dynamic speed: if 50% of all zombies are ticking, simulate 2x speed
+				__result = 1.5f * (float)tm.CurTimeSpeed / TickManager.percentageOfZombiesToTick;
+
+				if (zombie.isAlbino || zombie.state == ZombieState.Tracking || zombie.raging > 0 || zombie.wasMapPawnBefore)
+					__result *= ZombieSettings.Values.moveSpeedTracking;
+				else
+					__result *= ZombieSettings.Values.moveSpeedIdle;
+
+				var bodyType = zombie.story.bodyType;
+				if (bodyType == BodyTypeDefOf.Thin)
+					__result *= 0.75f;
+				else if (bodyType == BodyTypeDefOf.Hulk)
+					__result *= 0.2f;
+				else if (bodyType == BodyTypeDefOf.Fat)
+					__result *= 0.1f;
+
+				if (zombie.IsTanky)
+					__result *= 0.001f;
+				if (zombie.isAlbino)
+					__result *= 5f;
+				if (zombie.wasMapPawnBefore)
+					__result *= 2f;
+
+				return false;
+			}
+
+			static bool MeleeDodgeChance(out float __result, Zombie zombie)
+			{
+				__result = zombie.isAlbino ? 0f : 0.02f;
+				return false;
+			}
+
+			static bool MeleeHitChance(out float __result, Zombie zombie)
+			{
+				if (zombie.IsDowned())
+				{
+					__result = 0.1f;
+					return false;
+				}
+
+				if (zombie.hasTankyShield != -1f)
+				{
+					__result = 1.0f;
+					return false;
+				}
+
+				if (zombie.hasTankyHelmet != -1f || zombie.hasTankySuit != -1f)
+				{
+					__result = 0.9f;
+					return false;
+				}
+
+				if (zombie.story.bodyType == BodyTypeDefOf.Fat)
+				{
+					__result = 0.8f;
+					return false;
+				}
+
+				if (zombie.state == ZombieState.Tracking || zombie.raging > 0 || zombie.wasMapPawnBefore)
+					__result = Constants.ZOMBIE_HIT_CHANCE_TRACKING;
+				else
+					__result = Constants.ZOMBIE_HIT_CHANCE_IDLE;
+				return false;
+			}
+
+			static bool PainShockThreshold(out float __result, Zombie zombie)
+			{
+				if (zombie.raging > 0 || zombie.wasMapPawnBefore)
+				{
+					__result = 1000f;
+					return false;
+				}
+
+				if (zombie.hasTankyShield != -1f || zombie.hasTankyHelmet != -1f || zombie.hasTankySuit != -1f)
+				{
+					__result = 5000f;
+					return false;
+				}
+
+				var bodyType = zombie.story.bodyType;
+
+				if (bodyType == BodyTypeDefOf.Thin)
+				{
+					__result = 0.1f;
+					return false;
+				}
+
+				if (bodyType == BodyTypeDefOf.Hulk)
+				{
+					__result = 0.8f;
+					return false;
+				}
+
+				if (bodyType == BodyTypeDefOf.Fat)
+				{
+					__result = 10f;
+					return false;
+				}
+
+				__result = 0.8f;
+				return false;
 			}
 		}
 

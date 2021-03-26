@@ -18,11 +18,6 @@ USE_SOUND = true
 // Default is -1 which disables this setting
 DEBUG_MAX_ZOMBIE_COUNT = -1
 
-// Since v1.17 Zombieland uses a new zombie ticking system that is adaptive and
-// gives better speed results. You can turn it off to get the old behaviour
-// Default is true
-USE_ADAPTIVE_TICKING = true
-
 // This is the fade-off of the traces every enemy leaves behind in game-seconds.
 // Setting this lower will make zombies chaise you less because they loose track
 // of you. Default is 180.0

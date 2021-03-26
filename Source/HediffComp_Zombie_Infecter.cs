@@ -82,7 +82,9 @@ namespace ZombieLand
 			}
 		}
 
+#pragma warning disable CS0672
 		public override void CompTended(float quality, int batchPosition = 0)
+#pragma warning restore CS0672
 		{
 			Log.Warning($"CompTended[{ZombieSettings.Values.anyTreatmentStopsInfection}] {Pawn.Name} {quality} {batchPosition}");
 			if (ZombieSettings.Values.anyTreatmentStopsInfection)

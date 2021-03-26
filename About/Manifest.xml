@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Manifest>
   <identifier>net.pardeike.rimworld.mod.zombieland</identifier>
-  <version>2.1.0.0</version>
+  <version>2.1.2.0</version>
   <targetVersions>
     <li>1.0.0</li>
     <li>1.1.0</li>

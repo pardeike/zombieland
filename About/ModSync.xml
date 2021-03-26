@@ -2,7 +2,7 @@
 <ModSyncNinjaData>
   <ID>9eb909f7-baea-4835-ac73-24273636b549</ID>
   <ModName>Zombieland</ModName>
-  <Version>2.1.0.0</Version>
+  <Version>2.1.2.0</Version>
   <SaveBreaking>False</SaveBreaking>
   <Host name="Github">
     <Owner>pardeike</Owner>
