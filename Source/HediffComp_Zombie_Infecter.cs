@@ -82,9 +82,12 @@ namespace ZombieLand
 			}
 		}
 
-#pragma warning disable CS0672 // Member overrides obsolete member
 		public override void CompTended(float quality, int batchPosition = 0)
 		{
+			Log.Warning($"CompTended[{ZombieSettings.Values.anyTreatmentStopsInfection}] {Pawn.Name} {quality} {batchPosition}");
+			if (ZombieSettings.Values.anyTreatmentStopsInfection)
+				MakeHarmless();
+
 			if (infectionStartTime == 0)
 				return;
 
@@ -94,12 +97,6 @@ namespace ZombieLand
 			var bed = Pawn.CurrentBed();
 			if (bed == null)
 				return;
-
-			if (ZombieSettings.Values.anyTreatmentStopsInfection)
-			{
-				MakeHarmless();
-				return;
-			}
 
 			var tendQuality = bed.GetStatValue(StatDefOf.MedicalTendQualityOffset, true);
 			if (tendQuality < Props.minBedTendQualityToAvoidInfection)
@@ -115,7 +112,16 @@ namespace ZombieLand
 			if (Rand.Chance(quality))
 				MakeHarmless();
 		}
-#pragma warning restore CS0672 // Member overrides obsolete member
+
+#if RW11
+#else
+		public override void CompTended_NewTemp(float quality, float maxQuality, int batchPosition = 0)
+		{
+#pragma warning disable CS0618
+			CompTended(quality, batchPosition);
+#pragma warning restore CS0618
+		}
+#endif
 
 		public override string CompDebugString()
 		{
